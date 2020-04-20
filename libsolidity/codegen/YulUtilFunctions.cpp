@@ -299,9 +299,6 @@ string YulUtilFunctions::shiftRightFunction(size_t _numBits)
 
 string YulUtilFunctions::shiftRightFunctionDynamic()
 {
-	// Note that if this is extended with signed shifts,
-	// the opcodes SAR and SDIV behave differently with regards to rounding!
-
 	string const functionName = "shift_right_unsigned_dynamic";
 	return m_functionCollector.createFunction(functionName, [&]() {
 		return
@@ -317,6 +314,81 @@ string YulUtilFunctions::shiftRightFunctionDynamic()
 			)")
 			("functionName", functionName)
 			("hasShifts", m_evmVersion.hasBitwiseShifting())
+			.render();
+	});
+}
+
+string YulUtilFunctions::shiftRightSignedFunctionDynamic()
+{
+	string const functionName = "shift_right_signed_dynamic";
+	return m_functionCollector.createFunction(functionName, [&]() {
+		return
+			Whiskers(R"(
+			function <functionName>(bits, value) -> result {
+				<?hasShifts>
+					result := sar(bits, value)
+				<!hasShifts>
+					 let divisor := exp(2, bits)
+					 switch slt(value, 0)
+					 case 0 {
+						result := div(value, divisor)
+					 }
+					 default {
+						result := not(div(not(value), divisor))
+					 }
+				</hasShifts>
+			}
+			)")
+			("functionName", functionName)
+			("hasShifts", m_evmVersion.hasBitwiseShifting())
+			.render();
+	});
+}
+
+
+string YulUtilFunctions::typedShiftLeftFunction(Type const& _type, bool _amountSigned)
+{
+	solAssert(_type.category() == Type::Category::FixedBytes || _type.category() == Type::Category::Integer, "");
+	string const functionName = "shift_left_" + _type.identifier() + (_amountSigned ? "_signedAmount" : "");
+	return m_functionCollector.createFunction(functionName, [&]() {
+		return
+			Whiskers(R"(
+			function <functionName>(value, bits) -> result {
+				<?amountSigned>
+					if slt(bits, 0) { invalid() }
+				</amountSigned>
+				result := <cleanup>(<shift>(bits, value))
+			}
+			)")
+			("functionName", functionName)
+			("amountSigned", _amountSigned)
+			("shift", shiftLeftFunctionDynamic())
+			("cleanup", cleanupFunction(_type))
+			.render();
+	});
+}
+
+string YulUtilFunctions::typedShiftRightFunction(Type const& _type, bool _amountSigned)
+{
+	solAssert(_type.category() == Type::Category::FixedBytes || _type.category() == Type::Category::Integer, "");
+	IntegerType const* integerType = dynamic_cast<IntegerType const*>(&_type);
+	bool valueSigned = integerType && integerType->isSigned();
+
+	string const functionName = "shift_right_" + _type.identifier() + (_amountSigned ? "_signedAmount" : "");
+	return m_functionCollector.createFunction(functionName, [&]() {
+		return
+			Whiskers(R"(
+			function <functionName>(value, bits) -> result {
+				<?amountSigned>
+					if slt(bits, 0) { invalid() }
+				</amountSigned>
+				result := <cleanup>(<shift>(bits, value))
+			}
+			)")
+			("functionName", functionName)
+			("amountSigned", _amountSigned)
+			("shift", valueSigned ? shiftRightSignedFunctionDynamic() : shiftRightFunctionDynamic())
+			("cleanup", cleanupFunction(_type))
 			.render();
 	});
 }
